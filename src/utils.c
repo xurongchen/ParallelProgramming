@@ -21,7 +21,7 @@ int Initialize(int *argc, char ***argv, int *p_id, int *p_num, PROCESS_STATUS* p
 
 
 
-void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, SATData* data, int varNow){
+void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, SATData* data, int varNow, char* inputFile){
 
     WorkState state = initstate;
     // WorkState state = *p_id == 0 ? WORK_STATE_ENTRY: WORK_STATE_QUERY_TASK;
@@ -57,11 +57,12 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
         {
         case WORK_STATE_INIT:
             // data = LoadData("../uuf50-218/uuf50-090.cnf");
-            data = LoadData("../uf50-218/uf50-066.cnf");
+            // data = LoadData("../uf50-218/uf50-066.cnf");
+            data = LoadData(inputFile);
             #ifdef DEBUG
             printf("[P%d] LoadData Finished, vNum = %d, cNum = %d\n", *p_id, data->vNum, data->cNum);
             #endif
-            Work(p_id, p_num, p_status, WORK_STATE_ENTRY, data, 1);
+            Work(p_id, p_num, p_status, WORK_STATE_ENTRY, data, 1, NULL);
             return;
         case WORK_STATE_ENTRY:
             // Broadcast Busy state:
@@ -127,7 +128,7 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
                     idlePID = QueryIdleProcess(p_id, p_num, p_status);
                     isParalleled = 1;
                     if(idlePID == -1){
-                        Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                        Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1, NULL);
                     }
                     else { 
                         // try parallel:
@@ -159,7 +160,7 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
                     }
                 }
                 else{
-                    Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                    Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1, NULL);
                 }
                 DeassignValue(data, varNow);
             }
@@ -170,7 +171,7 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
                     idlePID = QueryIdleProcess(p_id, p_num, p_status);
                     isParalleled = 1;
                     if(idlePID == -1){
-                        Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                        Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1, NULL);
                     }
                     else { 
                         // try parallel:
@@ -201,7 +202,7 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
                     }
                 }
                 else{
-                    Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                    Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1, NULL);
                 }
                 DeassignValue(data, varNow);
             }
@@ -236,8 +237,8 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
 
                 msg.M_Type = MESSAGE_TYPE_REF;
                 msg.M_Content = PROCESS_STATUS_IDLE;
-                // for(int i = 1; i< *p_num; ++i){
-                for(int i = 1; i< 2; ++i){
+                for(int i = 1; i< *p_num; ++i){
+                // for(int i = 1; i< 2; ++i){
                     int target = (*p_id + i)% *p_num;
                     MPI_Send(   /* data = */ &msg,
                                 /* count = */ 1, 
@@ -317,7 +318,9 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
                 printf("[P%d] Send an SOLVED message to P%d\n", *p_id, target);
                 #endif
             }
-            return;
+            MPI_Finalize();
+            exit(0);
+            // return;
         default:
             break;
         }

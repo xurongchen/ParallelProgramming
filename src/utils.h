@@ -60,7 +60,7 @@ typedef int WorkState;
 #define WORK_STATE_SAT 20
 
 
-void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, SATData* data, int varNow);
+void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, SATData* data, int varNow, char* inputFile);
 
 int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status, int* Datalen);
 int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status);
