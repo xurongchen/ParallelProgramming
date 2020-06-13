@@ -1,5 +1,6 @@
 #include "sat.h"
 #include <stdlib.h>
+#include <string.h>
 
 int SAT(SATData* data, int varNow){
     if(varNow > data -> vNum){
@@ -185,7 +186,76 @@ void DestroyData(SATData* data){
     free(data);
 }
 
+// Encode format:
+// vNum | cNum | V:[int * (vNum+1)] | C:[Clause * (cNum+1)] | A: sum_{vNum + 1} [int[cN] + int * (cN)]
 
-void EncodeData(SATData* data, char* encode, int * length){
-    
+void EncodeData(SATData* data, char** encode, size_t *length){
+    int vNum = data->vNum;
+    int cNum = data->cNum;
+    *length = 0;
+    // Calculate malloc size:
+    *length += sizeof(int) * 2; // store vName and cNum
+    *length += sizeof(int) * (vNum + 1); // store array V
+    *length += sizeof(Clause) * (cNum + 1); // store array C: Un | trueVar
+
+    for(int i = 0; i <= vNum; ++i){
+        int cN = data->A[i].cN;
+        *length += sizeof(int) * (cN + 1); 
+    }
+
+    *encode = (char*) malloc(*length);
+
+    // Write data:
+    char* ptr = *encode;
+
+    memcpy(ptr, &data->vNum, sizeof(int));
+    ptr += sizeof(int);
+    memcpy(ptr, &data->cNum, sizeof(int));
+    ptr += sizeof(int);
+    memcpy(ptr, data->V, sizeof(int) * (vNum+1));
+    ptr += sizeof(int) * (vNum+1);
+    memcpy(ptr, data->C, sizeof(Clause) * (cNum + 1));
+    ptr += sizeof(Clause) * (cNum + 1);
+
+    for(int i = 0; i <= vNum; ++i){
+        int cN = data->A[i].cN;
+        memcpy(ptr, &data->A[i].cN, sizeof(int));
+        ptr += sizeof(int);
+        memcpy(ptr, data->A[i].term, sizeof(int) * cN);
+        ptr += sizeof(int) * cN;
+    }
+}
+
+// Encode format:
+// vNum | cNum | V:[int * (vNum+1)] | C:[ Clause * (cNum+1)] | A: sum_{vNum + 1} [int[cN] + int * (cN)]
+
+SATData* DecodeData(char* encode){
+    SATData* data = (SATData*) malloc(sizeof(SATData));
+    char* ptr = encode;
+    int vNum, cNum;
+    vNum = *(int*) ptr;
+    ptr += sizeof(int);
+    cNum = *(int*) ptr;
+    ptr += sizeof(int);
+    data -> vNum = vNum;
+    data -> cNum = cNum;
+
+    data -> V = (int*) malloc(sizeof(int) * (vNum + 1));
+    memcpy(data -> V, ptr, sizeof(int) * (vNum + 1));
+    ptr += sizeof(int) * (vNum + 1);
+
+    data -> C = (Clause*) malloc(sizeof(Clause) * (cNum + 1));
+    memcpy(data->C, ptr, sizeof(Clause) * (cNum + 1));
+    ptr += sizeof(Clause) * (cNum + 1);
+
+    data -> A = (VarAppear*) malloc(sizeof(VarAppear) * (vNum + 1));
+    for(int i = 0; i<= vNum; ++i){
+        int cN = *(int*) ptr;
+        data -> A[i].cN = cN; 
+        ptr += sizeof(int);
+        data -> A[i].term = (int*) malloc(sizeof(int) * cN); 
+        memcpy(data -> A[i].term, ptr, sizeof(int) * cN);
+        ptr += sizeof(int) * cN;
+    }
+    return data;
 }

@@ -43,5 +43,8 @@ void DestroyData(SATData* data);
 // #define TRACE_SAT
 // #define TRACE_AssignValue
 // #define TRACE_DestroyData
+#define TRACE_DecodeData
 
-void EncodeData(SATData* data, char* encode, int * length);
+void EncodeData(SATData* data, char** encode, size_t *length);
+
+SATData* DecodeData(char* encode);
