@@ -4,3 +4,5 @@ example/
 *.gz
 **/*.o
 .vscode/
+uf*/
+uuf*/
