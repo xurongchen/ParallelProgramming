@@ -20,19 +20,53 @@ int Initialize(int *argc, char ***argv, int *p_id, int *p_num, PROCESS_STATUS* p
 
 
 
-void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status){
-    WorkState state = *p_id == 0 ? WORK_STATE_ENTRY: WORK_STATE_QUERY_TASK;
+void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
+
+    WorkState state = initstate;
+    // WorkState state = *p_id == 0 ? WORK_STATE_ENTRY: WORK_STATE_QUERY_TASK;
     #ifdef DEBUG
     printf("Process %d is ok!\n", *p_id);
     #endif
     int flagHalf, taskPID, idlePID;
+
+    SimpleMessage msg;
+
+    MPI_Datatype SimpleType;
+    MPI_Datatype type[2] = { MPI_INT, MPI_INT };
+    int blocklen[2] = { 1, 1 }; 
+    MPI_Aint disp[2]; 
+    MPI_Aint base; 
+    MPI_Get_address(&msg, &base);
+    MPI_Get_address(&msg.M_Type, disp);
+    MPI_Get_address(&msg.M_Content, disp + 1);
+    disp[1] -= base;
+    disp[0] -= base;
+    MPI_Type_create_struct(2, blocklen, disp, type, &SimpleType);   
+    MPI_Type_commit(&SimpleType); 
+
     while(1){
+        #ifdef DEBUG_SLOW_OUTPUT
+        // usleep(10);
+        #endif
         #ifdef TRACE
         // printf("[P%d] Work: 01\n", *p_id);
         #endif
         switch (state)
         {
         case WORK_STATE_ENTRY:
+            // Broadcast Busy state:
+            msg.M_Type = MESSAGE_TYPE_REF;
+            msg.M_Content = PROCESS_STATUS_BUSY;
+            for(int i = 1; i< *p_num; ++i){
+                int target = (*p_id + i) % *p_num;
+                MPI_Send(   /* data = */ &msg,
+                            /* count = */ 1, 
+                            /* datatype = */ SimpleType, 
+                            /* dest = */ target, 
+                            /* tag = */ TAG_QUE, 
+                            /* comm = */ MPI_COMM_WORLD);
+            }
+        case WORK_STATE_DFS:
             /* code */
             flagHalf = 0;
             if(1) // Whether choose use other process?
@@ -46,22 +80,48 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status){
                 }
                 else {
                     flagHalf = 1;
-                    // Send data message to idlePID: (half task)
+                    // Send data message to idlePID: (half task, WORK_STATE_ENTRY)
 
-                    // Solve another half (half task)
+                    // Solve another half (half task, WORK_STATE_DFS)
                 }
             }
             if(flagHalf == 0){
-                // Solve one half (half task)
-                // Solve another half (half task)
+                // Solve one half (half task, WORK_STATE_DFS)
+                // Solve another half (half task, WORK_STATE_DFS)
             }
-            return; // DEBUG
-            break;
+
+            // If it is an entrance, broadcast idle infomation...
+            if(state == WORK_STATE_ENTRY){ 
+                *(p_status + *p_id) = PROCESS_STATUS_IDLE;
+
+                msg.M_Type = MESSAGE_TYPE_REF;
+                msg.M_Content = PROCESS_STATUS_IDLE;
+                for(int i = 1; i< *p_num; ++i){
+                    int target = (*p_id + i)% *p_num;
+                    MPI_Send(   /* data = */ &msg,
+                                /* count = */ 1, 
+                                /* datatype = */ SimpleType, 
+                                /* dest = */ target, 
+                                /* tag = */ TAG_QUE, 
+                                /* comm = */ MPI_COMM_WORLD);
+                    #ifdef TRACE_Work
+                    printf("[P%d] Send an Idle message to P%d\n", *p_id, target);
+                    #endif
+                }
+                state = WORK_STATE_QUERY_TASK;
+                break; // Task Finish
+            }
+            return; // DFS branch Finish
         case WORK_STATE_QUERY_TASK:
-            #ifdef TRACE
-            // printf("[P%d] Work: 03\n", *p_id);
+            #ifdef TRACE_Work
+            printf("[P%d] Work: 03\n", *p_id);
             #endif
+            if(QueryStop(p_id, p_num, p_status))
+                return;
             taskPID = QueryTask(p_id, p_num, p_status);
+            #ifdef TRACE_Work
+            printf("[P%d] Work: 08, taskPID = %d\n", *p_id, taskPID);
+            #endif
             if(taskPID != -1)
             {
                 // Prepare DATA:
@@ -75,6 +135,65 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status){
         }
 
     }
+}
+
+int QueryStop(int *p_id, int *p_num, PROCESS_STATUS* p_status){
+    SimpleMessage msg;
+    MPI_Request request;
+    MPI_Status status;
+    int recvFlag;
+
+    MPI_Datatype SimpleType;
+    MPI_Datatype type[2] = { MPI_INT, MPI_INT };
+    int blocklen[2] = { 1, 1 }; 
+    MPI_Aint disp[2]; 
+    MPI_Aint base; 
+    MPI_Get_address(&msg, &base);
+    MPI_Get_address(&msg.M_Type, disp);
+    MPI_Get_address(&msg.M_Content, disp + 1);
+    disp[1] -= base;
+    disp[0] -= base;
+    MPI_Type_create_struct(2, blocklen, disp, type, &SimpleType);   
+    MPI_Type_commit(&SimpleType); 
+
+    for(int i = 1; i< *p_num; ++i){
+        int target = (*p_id + i) % *p_num;
+
+        while(1){
+            MPI_Irecv(  /* buffer = */ &msg, 
+                                    /* count = */ 1, 
+                                    /* datatype = */ SimpleType, 
+                                    /* source = */ target, 
+                                    /* tag = */ TAG_QUE, 
+                                    /* comm = */ MPI_COMM_WORLD, 
+                                    /* request = */ &request);
+
+            MPI_Test(&request, &recvFlag, &status);
+            if(!recvFlag){ 
+                MPI_Cancel(&request);
+                MPI_Request_free(&request);
+                if(*(p_status + target) == PROCESS_STATUS_BUSY){
+                    #ifdef DEBUG
+                    printf("[P%d] Avoid stop because P%d is busy.\n", *p_id, target);
+                    #endif
+                    #ifdef DEBUG_SLOW_OUTPUT
+                    usleep(100000);
+                    #endif
+                    return 0; // No stop
+                }
+                break;
+            }
+            *(p_status + target) = msg.M_Content;
+            #ifdef DEBUG
+            printf("[P%d] Get a REF from P%d (ctx = %d).[QueryStop]\n", *p_id, target, msg.M_Content);
+            #endif
+        }
+        
+    }
+    #ifdef DEBUG
+    printf("[P%d] Found to stop.\n", *p_id);
+    #endif
+    return 1;// Stop
 }
 
 int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
@@ -104,8 +223,8 @@ int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     MPI_Type_create_struct(2, blocklen, disp, type, &SimpleType);   
     MPI_Type_commit(&SimpleType); 
 
-    for(int i = *p_id + 1; i< *p_id + *p_num; ++i){
-        int target = i % *p_num;
+    for(int i = 1; i< *p_num; ++i){
+        int target = (*p_id + i) % *p_num;
         #ifdef TRACE_QueryTask
         printf("[P%d] QueryTask: 02, target = %d\n", *p_id, target);
         printf("[P%d] QueryTask: 02@1, msg = %lld, msg.M_Type = %d, msg.M_Content = %u\n", *p_id, msg, msg.M_Type, msg.M_Content);
@@ -159,12 +278,19 @@ int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
                     /* comm = */ MPI_COMM_WORLD, 
                     /* request = */ &request);
         MPI_Test(&request, &recvFlag, &status);
-        time_t t_start = clock();
-        time_t t_now = clock();
+        clock_t t_start = clock();
+        clock_t t_now = clock();
+        #ifdef TimeCheck
+        printf("Time: %d\n", t_now);
+        #endif
 
         while(recvFlag == 0 && (t_now - t_start) <= COMMUNICATION_TIMEOUT){
             MPI_Test(&request, &recvFlag, &status);
             t_now = clock();
+            #ifdef TimeCheck
+            if((t_now - t_start) > COMMUNICATION_TIMEOUT)
+                printf("TimeOut time = %d\n", t_now);
+            #endif
         }
 
         if(recvFlag == 0){ 
@@ -212,8 +338,8 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     printf("[P%d] QueryIdleProcess: 01\n", *p_id);
     #endif
 
-    for(int i = *p_id + 1; i< *p_id + *p_num; ++i){
-        int target = i % *p_num;
+    for(int i = 1; i< *p_num; ++i){
+        int target = (*p_id + i) % *p_num;
 
         #ifdef TRACE_QueryIdleProcess
         printf("[P%d] QueryIdleProcess: 02, target = %d\n", *p_id, target);
@@ -238,6 +364,9 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
             #endif
             *(p_status + target) = msg.M_Content;
             // MPI_Request_free(&request);
+            #ifdef DEBUG
+            printf("[P%d] Get a REF from P%d (ctx = %d). [QueryIdleProcess]\n", *p_id, target, msg.M_Content);
+            #endif
         } 
 
         #ifdef TRACE_QueryIdleProcess
@@ -279,8 +408,8 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
 
             // usleep(COMMUNICATION_TIMEOUT*1000);
             MPI_Test(&request, &recvFlag, &status);
-            time_t t_start = clock();
-            time_t t_now = clock();
+            clock_t t_start = clock();
+            clock_t t_now = clock();
 
             #ifdef TRACE_QueryIdleProcess
             printf("[P%d] QueryIdleProcess: 08\n", *p_id);
@@ -307,7 +436,7 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
             #ifdef DEBUG
             int targetMSG = msg.M_Content;
             // MPI_Request_free(&request);
-            printf("[P%d] Idle target is %d (logic), %d (msg)\n", *p_id, target, targetMSG);
+            printf("[P%d] Receive an ACK from %d\n", *p_id, target);
             #endif
             // Receive ACK message, trying to establish communication...
             return target; // Find an idle process target
@@ -319,5 +448,5 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
 void fooJob(int l,  int r, int *p_id, int *p_num, PROCESS_STATUS* p_status){
     printf("[P%d] Foo job %d is solved\n", *p_id, l);
     if(l + 1 < r)
-       Work(p_id, p_num, p_status); 
+       Work(p_id, p_num, p_status, p_id == 0? PROCESS_STATUS_BUSY:PROCESS_STATUS_IDLE); 
 }
