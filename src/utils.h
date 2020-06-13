@@ -4,15 +4,18 @@
 
 #define DEBUG 
 #define TRACE 
+
+#ifdef TRACE
 #define TRACE_QueryIdleProcess
 #define TRACE_QueryTask
+#endif
 
 #define MAX_PROCESS_NUM 16
 
 typedef struct {
-    char M_Type;
-    void* M_Content;
-} Message;
+    int M_Type;
+    int M_Content;
+} SimpleMessage;
 
 // Status Refresh
 #define MESSAGE_TYPE_REF 0; 

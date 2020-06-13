@@ -78,9 +78,9 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status){
 }
 
 int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
-    Message msg;
-    int msgContent[] = {0};
-    msg.M_Content = msgContent;
+    SimpleMessage msg;
+    // int msgContent[] = {0};
+    msg.M_Content = 0;
     MPI_Request request;
     MPI_Status status;
     int recvFlag;
@@ -88,8 +88,8 @@ int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     printf("[P%d] QueryTask: 00\n", *p_id);
     #endif
     MPI_Datatype SimpleType;
-    MPI_Datatype type[2] = { MPI_CHAR, MPI_CHAR };
-    int blocklen[2] = { 1, 4 }; 
+    MPI_Datatype type[2] = { MPI_INT, MPI_INT };
+    int blocklen[2] = { 1, 1 }; 
     MPI_Aint disp[2]; 
     MPI_Aint base; 
     MPI_Get_address(&msg, &base);
@@ -129,17 +129,17 @@ int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
         printf("[P%d] QueryTask: 03@1, msg = %lld\n", *p_id, msg);
         #endif
         #ifdef TRACE_QueryTask
-        printf("[P%d] QueryTask: 03A, target = %d, msg.M_Type = %d, &msg.M_Content = %u, &msg=%u\n", *p_id, target, msg.M_Type, &msg.M_Content, &msg);
+        printf("[P%d] QueryTask: 03A, target = %d, msg.M_Type = %d, msg.M_Content = %d, &msg=%u\n", *p_id, target, msg.M_Type, msg.M_Content, &msg);
         #endif
         #ifdef DEBUG
-        int REQ_pid = *((int*) msg.M_Content);
+        int REQ_pid = msg.M_Content;
         printf("[P%d] Received a REQ from P%d\n", *p_id, REQ_pid);
         #endif
-        MPI_Request_free(&request);
+        // MPI_Request_free(&request);
 
         msg.M_Type = MESSAGE_TYPE_ACK;
-        int content[] = {*p_id};
-        msg.M_Content = content;
+        // int content[] = {*p_id};
+        msg.M_Content = *p_id;
         #ifdef DEBUG
         printf("[P%d] Send an ACK to P%d\n", *p_id, REQ_pid);
         #endif
@@ -187,16 +187,16 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     #ifdef TRACE_QueryIdleProcess
     printf("[P%d] QueryIdleProcess: 00\n", *p_id);
     #endif
-    Message msg;
-    int msgContent[] = {0};
-    msg.M_Content = msgContent;
+    SimpleMessage msg;
+    // int msgContent[] = {0};
+    msg.M_Content = 0;
     MPI_Request request;
     MPI_Status status;
     int recvFlag;
 
     MPI_Datatype SimpleType;
-    MPI_Datatype type[2] = { MPI_CHAR, MPI_CHAR };
-    int blocklen[2] = { 1, 4 }; 
+    MPI_Datatype type[2] = { MPI_INT, MPI_INT };
+    int blocklen[2] = { 1, 1 }; 
     MPI_Aint disp[2]; 
     MPI_Aint base; 
     MPI_Get_address(&msg, &base);
@@ -236,8 +236,8 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
             #ifdef TRACE_QueryIdleProcess
             printf("[P%d] QueryIdleProcess: 03, request = %u\n", *p_id, &request);
             #endif
-            *(p_status + target) = *((int*) msg.M_Content);
-            MPI_Request_free(&request);
+            *(p_status + target) = msg.M_Content;
+            // MPI_Request_free(&request);
         } 
 
         #ifdef TRACE_QueryIdleProcess
@@ -247,11 +247,11 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
         if(*(p_status + target) == PROCESS_STATUS_IDLE)
         { // Make a request
             msg.M_Type = MESSAGE_TYPE_REQ;
-            int content[] = {*p_id};
+            // int content[] = {*p_id};
             #ifdef TRACE_QueryIdleProcess
-            printf("[P%d] QueryIdleProcess: 06, content = %u, msg = %u, msg.M_Type=%u, msg.M_Content=%u\n", *p_id, content, &msg, msg.M_Type, msg.M_Content);
+            printf("[P%d] QueryIdleProcess: 06, msg = %u, msg.M_Type=%u, msg.M_Content=%u\n", *p_id, &msg, msg.M_Type, msg.M_Content);
             #endif
-            msg.M_Content = content;
+            msg.M_Content = *p_id;
             #ifdef TRACE_QueryIdleProcess
             printf("[P%d] QueryIdleProcess: 06A\n", *p_id);
             #endif
@@ -264,7 +264,7 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
                         /* tag = */ TAG_REQ, 
                         /* comm = */ MPI_COMM_WORLD);
             #ifdef TRACE_QueryIdleProcess
-            printf("[P%d] QueryIdleProcess: 07, *msg.M_Content = %d, msg.M_Content = %d, &msg=%u, &msg.M_Content=%u\n", *p_id, *(int*) msg.M_Content, msg.M_Content,&msg,&msg.M_Content);
+            printf("[P%d] QueryIdleProcess: 07, msg.M_Content = %d, &msg=%u, &msg.M_Content=%u\n", *p_id, msg.M_Content,&msg, &msg.M_Content);
             #endif
             #ifdef DEBUG
             printf("[P%d] Send a REQ to %d\n", *p_id, target);
@@ -305,8 +305,8 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
                 continue; // Failed to receive ACK message
             }
             #ifdef DEBUG
-            int targetMSG = * (int*) msg.M_Content;
-            MPI_Request_free(&request);
+            int targetMSG = msg.M_Content;
+            // MPI_Request_free(&request);
             printf("[P%d] Idle target is %d (logic), %d (msg)\n", *p_id, target, targetMSG);
             #endif
             // Receive ACK message, trying to establish communication...
