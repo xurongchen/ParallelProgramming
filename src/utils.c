@@ -67,6 +67,13 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
                             /* comm = */ MPI_COMM_WORLD);
             }
         case WORK_STATE_DFS:
+            int solvedId = QuerySolved(p_id, p_num, p_status);
+            if(solvedId != -1){
+                #ifdef TRACE_Work
+                printf("[P%d] Find P%d has solved, so stop from runnning.", *p_id, solvedId);
+                #endif
+                return;
+            }
             /* code */
             flagHalf = 0;
             if(1) // Whether choose use other process?
@@ -116,7 +123,7 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
             #ifdef TRACE_Work
             printf("[P%d] Work: 03\n", *p_id);
             #endif
-            if(QueryStop(p_id, p_num, p_status))
+            if(QueryStopIdle(p_id, p_num, p_status))
                 return;
             taskPID = QueryTask(p_id, p_num, p_status);
             #ifdef TRACE_Work
@@ -136,8 +143,66 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
 
     }
 }
+int QuerySolved(int *p_id, int *p_num, PROCESS_STATUS* p_status){
+    SimpleMessage msg;
+    MPI_Request request;
+    MPI_Status status;
+    int recvFlag;
 
-int QueryStop(int *p_id, int *p_num, PROCESS_STATUS* p_status){
+    MPI_Datatype SimpleType;
+    MPI_Datatype type[2] = { MPI_INT, MPI_INT };
+    int blocklen[2] = { 1, 1 }; 
+    MPI_Aint disp[2]; 
+    MPI_Aint base; 
+    MPI_Get_address(&msg, &base);
+    MPI_Get_address(&msg.M_Type, disp);
+    MPI_Get_address(&msg.M_Content, disp + 1);
+    disp[1] -= base;
+    disp[0] -= base;
+    MPI_Type_create_struct(2, blocklen, disp, type, &SimpleType);   
+    MPI_Type_commit(&SimpleType); 
+
+    for(int i = 1; i< *p_num; ++i){
+        int target = (*p_id + i) % *p_num;
+
+        while(1){
+            MPI_Irecv(  /* buffer = */ &msg, 
+                                    /* count = */ 1, 
+                                    /* datatype = */ SimpleType, 
+                                    /* source = */ target, 
+                                    /* tag = */ TAG_QUE, 
+                                    /* comm = */ MPI_COMM_WORLD, 
+                                    /* request = */ &request);
+
+            MPI_Test(&request, &recvFlag, &status);
+            if(!recvFlag){ 
+                MPI_Cancel(&request);
+                MPI_Request_free(&request);
+                if(*(p_status + target) == PROCESS_STATUS_SOLVED){
+                    
+                    return target; // Solved
+                }
+                break;
+            }
+            *(p_status + target) = msg.M_Content;
+            #ifdef DEBUG
+            printf("[P%d] Get a REF from P%d (ctx = %d).[QuerySolved]\n", *p_id, target, msg.M_Content);
+            #endif
+        }
+        
+    }
+    return -1;// Not solved
+}
+
+int QueryStopIdle(int *p_id, int *p_num, PROCESS_STATUS* p_status){
+    int solvedId = QuerySolved(p_id, p_num, p_status);
+    if(solvedId != -1){
+        #ifdef TRACE_Work
+        printf("[P%d] Find P%d has solved, so stop from Idle.", *p_id, solvedId);
+        #endif
+        return 1; // Stop
+    } 
+
     SimpleMessage msg;
     MPI_Request request;
     MPI_Status status;
@@ -185,7 +250,7 @@ int QueryStop(int *p_id, int *p_num, PROCESS_STATUS* p_status){
             }
             *(p_status + target) = msg.M_Content;
             #ifdef DEBUG
-            printf("[P%d] Get a REF from P%d (ctx = %d).[QueryStop]\n", *p_id, target, msg.M_Content);
+            printf("[P%d] Get a REF from P%d (ctx = %d).[QueryStopIdle]\n", *p_id, target, msg.M_Content);
             #endif
         }
         
@@ -450,3 +515,4 @@ void fooJob(int l,  int r, int *p_id, int *p_num, PROCESS_STATUS* p_status){
     if(l + 1 < r)
        Work(p_id, p_num, p_status, p_id == 0? PROCESS_STATUS_BUSY:PROCESS_STATUS_IDLE); 
 }
+

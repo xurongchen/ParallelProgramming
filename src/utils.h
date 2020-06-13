@@ -35,11 +35,12 @@ typedef struct {
 #define TAG_DATA 0x0000000f0
 
 // Communication timeout setting: s
-#define COMMUNICATION_TIMEOUT (CLOCKS_PER_SEC)
+#define COMMUNICATION_TIMEOUT (CLOCKS_PER_SEC/100)
 
 typedef char PROCESS_STATUS;
 #define PROCESS_STATUS_BUSY 1
 #define PROCESS_STATUS_IDLE 0
+#define PROCESS_STATUS_SOLVED 2
 
 int Initialize(int *argc, char ***argv, int *p_id, int *p_num, PROCESS_STATUS* p_status);
 
@@ -56,3 +57,4 @@ int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status);
 int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status);
 
 void fooJob(int l,int r, int *p_id, int *p_num, PROCESS_STATUS* p_status);
+
