@@ -51,12 +51,13 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
         // usleep(10);
         #endif
         #ifdef TRACE
-        // printf("[P%d] Work: 01\n", *p_id);
+        // printf("[P%d] Work: 01, state = %d\n", *p_id, state);
         #endif
         switch (state)
         {
         case WORK_STATE_INIT:
-            data = LoadData("../uuf50-218/uuf50-090.cnf");
+            // data = LoadData("../uuf50-218/uuf50-090.cnf");
+            data = LoadData("../uf50-218/uf50-066.cnf");
             #ifdef DEBUG
             printf("[P%d] LoadData Finished, vNum = %d, cNum = %d\n", *p_id, data->vNum, data->cNum);
             #endif
@@ -83,6 +84,20 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
                 printf("[P%d] Find P%d has solved, so stop from runnning.\n", *p_id, solvedId);
                 #endif
                 // return;
+                msg.M_Type = MESSAGE_TYPE_REF;
+                msg.M_Content = PROCESS_STATUS_SOLVED;
+                for(int i = 1; i< *p_num; ++i){
+                    int target = (*p_id + i)% *p_num;
+                    MPI_Send(   /* data = */ &msg,
+                                /* count = */ 1, 
+                                /* datatype = */ SimpleType, 
+                                /* dest = */ target, 
+                                /* tag = */ TAG_QUE, 
+                                /* comm = */ MPI_COMM_WORLD);
+                    #ifdef TRACE_Work
+                    printf("[P%d] Send an SOLVED message to P%d\n", *p_id, target);
+                    #endif
+                }
                 MPI_Finalize();
                 exit(0);
             }
@@ -221,7 +236,8 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, 
 
                 msg.M_Type = MESSAGE_TYPE_REF;
                 msg.M_Content = PROCESS_STATUS_IDLE;
-                for(int i = 1; i< *p_num; ++i){
+                // for(int i = 1; i< *p_num; ++i){
+                for(int i = 1; i< 2; ++i){
                     int target = (*p_id + i)% *p_num;
                     MPI_Send(   /* data = */ &msg,
                                 /* count = */ 1, 
@@ -363,13 +379,7 @@ int QuerySolved(int *p_id, int *p_num, PROCESS_STATUS* p_status){
 }
 
 int QueryStopIdle(int *p_id, int *p_num, PROCESS_STATUS* p_status){
-    int solvedId = QuerySolved(p_id, p_num, p_status);
-    if(solvedId != -1){
-        #ifdef TRACE_Work
-        printf("[P%d] Find P%d has solved, so stop from Idle.", *p_id, solvedId);
-        #endif
-        return 1; // Stop
-    } 
+    
 
     SimpleMessage msg;
     MPI_Request request;
@@ -388,6 +398,33 @@ int QueryStopIdle(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     disp[0] -= base;
     MPI_Type_create_struct(2, blocklen, disp, type, &SimpleType);   
     MPI_Type_commit(&SimpleType); 
+
+    int solvedId = QuerySolved(p_id, p_num, p_status);
+    if(solvedId != -1){
+        // #ifdef TRACE_Work
+        // printf("[P%d] Find P%d has solved, so stop from Idle.", *p_id, solvedId);
+        // #endif
+        // return 1; // Stop
+        #ifdef TRACE_Work
+        printf("[P%d] Find P%d has solved, so stop from runnning.\n", *p_id, solvedId);
+        #endif
+        msg.M_Type = MESSAGE_TYPE_REF;
+        msg.M_Content = PROCESS_STATUS_SOLVED;
+        for(int i = 1; i< *p_num; ++i){
+            int target = (*p_id + i)% *p_num;
+            MPI_Send(   /* data = */ &msg,
+                        /* count = */ 1, 
+                        /* datatype = */ SimpleType, 
+                        /* dest = */ target, 
+                        /* tag = */ TAG_QUE, 
+                        /* comm = */ MPI_COMM_WORLD);
+            #ifdef TRACE_Work
+            printf("[P%d] Send an SOLVED message to P%d\n", *p_id, target);
+            #endif
+        }
+        MPI_Finalize();
+        exit(0);
+    } 
 
     for(int i = 1; i< *p_num; ++i){
         int target = (*p_id + i) % *p_num;

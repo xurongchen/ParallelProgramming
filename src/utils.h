@@ -12,7 +12,7 @@
 // #define TRACE_QueryIdleProcess
 // #define TRACE_QueryTask
 // #define TRACE_QueryStop
-// #define TRACE_Work
+#define TRACE_Work
 #endif
 
 #define MAX_PROCESS_NUM 16
@@ -42,7 +42,7 @@ typedef struct {
 #define TAG_RAW_DATA 0x0000000ff
 
 // Communication timeout setting: s
-#define COMMUNICATION_TIMEOUT (CLOCKS_PER_SEC/100)
+#define COMMUNICATION_TIMEOUT (CLOCKS_PER_SEC/10)
 
 typedef char PROCESS_STATUS;
 #define PROCESS_STATUS_BUSY 1
