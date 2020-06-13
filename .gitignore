@@ -1,0 +1,6 @@
+openmpi-*/
+**/.DS_Store
+example/
+*.gz
+**/*.o
+.vscode/
