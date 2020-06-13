@@ -1,5 +1,6 @@
 #include "utils.h"
 #include <time.h>
+#include "sat.h"
 
 int Initialize(int *argc, char ***argv, int *p_id, int *p_num, PROCESS_STATUS* p_status){
     MPI_Init (argc, argv);	/* starts MPI */
@@ -20,16 +21,17 @@ int Initialize(int *argc, char ***argv, int *p_id, int *p_num, PROCESS_STATUS* p
 
 
 
-void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
+void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate, SATData* data, int varNow){
 
     WorkState state = initstate;
     // WorkState state = *p_id == 0 ? WORK_STATE_ENTRY: WORK_STATE_QUERY_TASK;
     #ifdef DEBUG
-    printf("Process %d is ok!\n", *p_id);
+    // printf("Process %d is ok! (varNow = %d, WorkState = %d)\n", *p_id, varNow, state);
     #endif
-    int flagHalf, taskPID, idlePID;
+    int flagHalf, taskPID, idlePID, solvedId;
 
     SimpleMessage msg;
+    MPI_Status status;
 
     MPI_Datatype SimpleType;
     MPI_Datatype type[2] = { MPI_INT, MPI_INT };
@@ -53,6 +55,13 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
         #endif
         switch (state)
         {
+        case WORK_STATE_INIT:
+            data = LoadData("../uuf50-218/uuf50-090.cnf");
+            #ifdef DEBUG
+            printf("[P%d] LoadData Finished, vNum = %d, cNum = %d\n", *p_id, data->vNum, data->cNum);
+            #endif
+            Work(p_id, p_num, p_status, WORK_STATE_ENTRY, data, 1);
+            return;
         case WORK_STATE_ENTRY:
             // Broadcast Busy state:
             msg.M_Type = MESSAGE_TYPE_REF;
@@ -66,36 +75,145 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
                             /* tag = */ TAG_QUE, 
                             /* comm = */ MPI_COMM_WORLD);
             }
+
         case WORK_STATE_DFS:
-            int solvedId = QuerySolved(p_id, p_num, p_status);
+            solvedId = QuerySolved(p_id, p_num, p_status);
             if(solvedId != -1){
                 #ifdef TRACE_Work
-                printf("[P%d] Find P%d has solved, so stop from runnning.", *p_id, solvedId);
+                printf("[P%d] Find P%d has solved, so stop from runnning.\n", *p_id, solvedId);
                 #endif
-                return;
+                // return;
+                MPI_Finalize();
+                exit(0);
             }
-            /* code */
-            flagHalf = 0;
-            if(1) // Whether choose use other process?
-            {
-                #ifdef TRACE
-                // printf("[P%d] Work: 02\n", *p_id);
-                #endif
-                idlePID = QueryIdleProcess(p_id, p_num, p_status);
-                if(idlePID == -1){
-                    flagHalf = 0;
+            // check itself is already finished:
+            if(varNow > data -> vNum){
+                printf("[P%d] Find SAT:\n", *p_id);
+                for(int i = 1; i <= data->vNum; ++i){
+                    if(data -> V[i] == 1)
+                        printf("v%2d:T;\t", i);
+                    else{
+                        printf("v%2d:F;\t", i);
+                    }
+                    if(i % 10 == 0 || i == data->vNum)
+                        printf("\n");
                 }
-                else {
-                    flagHalf = 1;
-                    // Send data message to idlePID: (half task, WORK_STATE_ENTRY)
+                *(p_status + *p_id) = PROCESS_STATUS_SOLVED;
+                state = WORK_STATE_SAT;
+                break; // Find a solution
+            }
 
-                    // Solve another half (half task, WORK_STATE_DFS)
+            int varLeft = data -> vNum - varNow;
+            int isParalleled = 0;
+            int ASucc = AssignValue(data, varNow, -1); // Test Neg
+            if(ASucc == 0){
+                if(varLeft > MIN_NO_PARALLEL)
+                { 
+                    idlePID = QueryIdleProcess(p_id, p_num, p_status);
+                    isParalleled = 1;
+                    if(idlePID == -1){
+                        Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                    }
+                    else { 
+                        // try parallel:
+                        char* encode;
+                        size_t len;
+                        EncodeData(data, &encode, &len);
+
+                        msg.M_Type = MESSAGE_TYPE_DATA;
+                        msg.M_Content = len;
+
+                        MPI_Send(   /* data = */ &msg,
+                                    /* count = */ 1, 
+                                    /* datatype = */ SimpleType, 
+                                    /* dest = */ idlePID, 
+                                    /* tag = */ TAG_DATA, 
+                                    /* comm = */ MPI_COMM_WORLD);
+
+                        MPI_Send(   /* data = */ encode,
+                                    /* count = */ len, 
+                                    /* datatype = */ MPI_CHAR, 
+                                    /* dest = */ idlePID, 
+                                    /* tag = */ TAG_RAW_DATA, 
+                                    /* comm = */ MPI_COMM_WORLD);
+                        #ifdef DEBUG
+                        printf("[P%d] Send a RAW_DATA to %d, len:%d\n", *p_id, idlePID, len);
+                        #endif
+                        free(encode);
+                        
+                    }
                 }
+                else{
+                    Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                }
+                DeassignValue(data, varNow);
             }
-            if(flagHalf == 0){
-                // Solve one half (half task, WORK_STATE_DFS)
-                // Solve another half (half task, WORK_STATE_DFS)
+
+            ASucc = AssignValue(data, varNow, 1); // Test Pos
+            if(ASucc == 0){
+                if(isParalleled == 0 && varLeft > MIN_NO_PARALLEL){
+                    idlePID = QueryIdleProcess(p_id, p_num, p_status);
+                    isParalleled = 1;
+                    if(idlePID == -1){
+                        Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                    }
+                    else { 
+                        // try parallel:
+                        char* encode;
+                        size_t len;
+                        EncodeData(data, &encode, &len);
+
+                        msg.M_Type = MESSAGE_TYPE_DATA;
+                        msg.M_Content = len;
+
+                        MPI_Send(   /* data = */ &msg,
+                                    /* count = */ 1, 
+                                    /* datatype = */ SimpleType, 
+                                    /* dest = */ idlePID, 
+                                    /* tag = */ TAG_DATA, 
+                                    /* comm = */ MPI_COMM_WORLD);
+
+                        MPI_Send(   /* data = */ encode,
+                                    /* count = */ len, 
+                                    /* datatype = */ MPI_CHAR, 
+                                    /* dest = */ idlePID, 
+                                    /* tag = */ TAG_RAW_DATA, 
+                                    /* comm = */ MPI_COMM_WORLD);
+                        #ifdef DEBUG
+                        printf("[P%d] Send a RAW_DATA(1) to %d, len:%d\n", *p_id, idlePID, len);
+                        #endif
+                        free(encode);
+                    }
+                }
+                else{
+                    Work(p_id, p_num, p_status, WORK_STATE_DFS, data, varNow + 1);
+                }
+                DeassignValue(data, varNow);
             }
+            
+
+            // /* code */
+            // flagHalf = 0;
+            // if(1) // Whether choose use other process?
+            // {
+            //     #ifdef TRACE
+            //     // printf("[P%d] Work: 02\n", *p_id);
+            //     #endif
+            //     idlePID = QueryIdleProcess(p_id, p_num, p_status);
+            //     if(idlePID == -1){
+            //         flagHalf = 0;
+            //     }
+            //     else {
+            //         flagHalf = 1;
+            //         // Send data message to idlePID: (half task, WORK_STATE_ENTRY)
+
+            //         // Solve another half (half task, WORK_STATE_DFS)
+            //     }
+            // }
+            // if(flagHalf == 0){
+            //     // Solve one half (half task, WORK_STATE_DFS)
+            //     // Solve another half (half task, WORK_STATE_DFS)
+            // }
 
             // If it is an entrance, broadcast idle infomation...
             if(state == WORK_STATE_ENTRY){ 
@@ -116,6 +234,8 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
                     #endif
                 }
                 state = WORK_STATE_QUERY_TASK;
+                DestroyData(data);
+                data = NULL;
                 break; // Task Finish
             }
             return; // DFS branch Finish
@@ -123,20 +243,65 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
             #ifdef TRACE_Work
             printf("[P%d] Work: 03\n", *p_id);
             #endif
-            if(QueryStopIdle(p_id, p_num, p_status))
+            if(QueryStopIdle(p_id, p_num, p_status)){
+                if(* p_id == 0){
+                    printf("UNSAT\n", *p_id);
+                }
                 return;
-            taskPID = QueryTask(p_id, p_num, p_status);
+            }
+            int DataLen;
+            taskPID = QueryTask(p_id, p_num, p_status, &DataLen);
             #ifdef TRACE_Work
             printf("[P%d] Work: 08, taskPID = %d\n", *p_id, taskPID);
             #endif
             if(taskPID != -1)
             {
                 // Prepare DATA:
+                char* encodeData;
+                encodeData = (char *) malloc(DataLen);
+                #ifdef DEBUG
+                // printf("[P%d] Before Recv: ec[0] = %d, ec[1] = %d\n", *p_id, *((int*) encodeData), *((int*) encodeData + 1));
+                #endif    
+                MPI_Recv(   /* data = */ encodeData,
+                            /* count = */ DataLen, 
+                            /* datatype = */ MPI_CHAR, 
+                            /* source = */ taskPID, 
+                            /* tag = */ TAG_RAW_DATA, 
+                            /* comm = */ MPI_COMM_WORLD,
+                            /* status = */ &status);
+                #ifdef DEBUG
+                // printf("[P%d] Before decode: a0 = %d, a1 = %d, a2 = %d, a3 = %d, a4 = %d, a5 = %d\n", *p_id, encodeData, DataLen, MPI_CHAR, taskPID, TAG_RAW_DATA, MPI_COMM_WORLD);
 
+                // printf("[P%d] Before decode: ec[0] = %d, ec[1] = %d, ec[2] = %d, ec[3] = %d, ec[4] = %d, ec[5] = %d\n", *p_id, *((int*) encodeData), *((int*) encodeData + 1), *((int*) encodeData + 2), *((int*) encodeData + 3), *((int*) encodeData + 4), *((int*) encodeData + 5));
+                #endif
+                data = DecodeData(encodeData);
+                varNow = 1;
+                while(data->V[varNow] != 0){
+                    varNow += 1;
+                }
+                #ifdef DEBUG
+                printf("[P%d] DecodeData Finished, vNum = %d, cNum = %d, DataLen = %d\n", *p_id, data->vNum, data->cNum, DataLen);
+                #endif
                 // Goto WORK_STATE_ENTRY:
                 state = WORK_STATE_ENTRY;
             }
             break;
+        case WORK_STATE_SAT:
+            msg.M_Type = MESSAGE_TYPE_REF;
+            msg.M_Content = PROCESS_STATUS_SOLVED;
+            for(int i = 1; i< *p_num; ++i){
+                int target = (*p_id + i)% *p_num;
+                MPI_Send(   /* data = */ &msg,
+                            /* count = */ 1, 
+                            /* datatype = */ SimpleType, 
+                            /* dest = */ target, 
+                            /* tag = */ TAG_QUE, 
+                            /* comm = */ MPI_COMM_WORLD);
+                #ifdef TRACE_Work
+                printf("[P%d] Send an SOLVED message to P%d\n", *p_id, target);
+                #endif
+            }
+            return;
         default:
             break;
         }
@@ -144,6 +309,9 @@ void Work(int *p_id, int *p_num, PROCESS_STATUS* p_status, WorkState initstate){
     }
 }
 int QuerySolved(int *p_id, int *p_num, PROCESS_STATUS* p_status){
+    if(*(p_status + *p_id) == PROCESS_STATUS_SOLVED){
+        return *p_id;
+    }
     SimpleMessage msg;
     MPI_Request request;
     MPI_Status status;
@@ -261,7 +429,7 @@ int QueryStopIdle(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     return 1;// Stop
 }
 
-int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
+int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status, int* Datalen){
     SimpleMessage msg;
     // int msgContent[] = {0};
     msg.M_Content = 0;
@@ -369,6 +537,7 @@ int QueryTask(int *p_id, int *p_num, PROCESS_STATUS* p_status){
         #ifdef DEBUG
         printf("[P%d] Received a DATA from P%d\n", *p_id, REQ_pid);
         #endif
+        *Datalen = msg.M_Content;
         return target;
     }
     return -1; // No task application...
@@ -510,9 +679,9 @@ int QueryIdleProcess(int *p_id, int *p_num, PROCESS_STATUS* p_status){
     return -1; // Failed to find an idle process.
 }
 
-void fooJob(int l,  int r, int *p_id, int *p_num, PROCESS_STATUS* p_status){
-    printf("[P%d] Foo job %d is solved\n", *p_id, l);
-    if(l + 1 < r)
-       Work(p_id, p_num, p_status, p_id == 0? PROCESS_STATUS_BUSY:PROCESS_STATUS_IDLE); 
-}
+// void fooJob(int l,  int r, int *p_id, int *p_num, PROCESS_STATUS* p_status){
+//     printf("[P%d] Foo job %d is solved\n", *p_id, l);
+//     if(l + 1 < r)
+//        Work(p_id, p_num, p_status, p_id == 0? PROCESS_STATUS_BUSY:PROCESS_STATUS_IDLE); 
+// }
 

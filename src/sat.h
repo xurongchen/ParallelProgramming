@@ -1,3 +1,4 @@
+#pragma once
 #include <stdio.h>
 typedef struct{
     // int n; // number of term
@@ -43,7 +44,8 @@ void DestroyData(SATData* data);
 // #define TRACE_SAT
 // #define TRACE_AssignValue
 // #define TRACE_DestroyData
-#define TRACE_DecodeData
+// #define TRACE_DecodeData
+// #define TRACE_EncodeData
 
 void EncodeData(SATData* data, char** encode, size_t *length);
 

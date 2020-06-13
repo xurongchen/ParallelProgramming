@@ -217,6 +217,11 @@ void EncodeData(SATData* data, char** encode, size_t *length){
     memcpy(ptr, data->C, sizeof(Clause) * (cNum + 1));
     ptr += sizeof(Clause) * (cNum + 1);
 
+    #ifdef TRACE_EncodeData
+    printf("[Trace] Encode result: v=%d, c=%d\n", *(int*) *encode, *((int*) *encode + 1));
+    // printf("[Trace] Encode result: ec[2]=%d, ec[2]=%d\n", *((int*) *encode + 2), *((int*) *encode + 3));
+    #endif
+
     for(int i = 0; i <= vNum; ++i){
         int cN = data->A[i].cN;
         memcpy(ptr, &data->A[i].cN, sizeof(int));
@@ -239,6 +244,16 @@ SATData* DecodeData(char* encode){
     ptr += sizeof(int);
     data -> vNum = vNum;
     data -> cNum = cNum;
+    // memcpy(&data->vNum, ptr, sizeof(int));
+    // vNum = data->vNum;
+    // ptr += sizeof(int);
+    // memcpy(&data->cNum, ptr, sizeof(int));
+    // vNum = data->cNum;
+    // ptr += sizeof(int);
+
+    #ifdef TRACE_DecodeData
+    printf("[Trace] Decode result: v=%d, c=%d\n", data->vNum, data->cNum);
+    #endif
 
     data -> V = (int*) malloc(sizeof(int) * (vNum + 1));
     memcpy(data -> V, ptr, sizeof(int) * (vNum + 1));

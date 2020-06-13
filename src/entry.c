@@ -19,7 +19,7 @@ int main(argc, argv)
       return 0;
   }
 
-  Work(&p_id, &p_num, p_status, p_id == 0? WORK_STATE_ENTRY: WORK_STATE_QUERY_TASK);
+  Work(&p_id, &p_num, p_status, p_id == 0? WORK_STATE_INIT: WORK_STATE_QUERY_TASK, NULL, 0);
 
   // printf( "Hello world from process %d of %d\n", p_id, p_num );
   MPI_Finalize();
