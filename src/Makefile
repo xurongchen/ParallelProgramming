@@ -1,9 +1,10 @@
 clean:
 	rm *.o temp
 build:
-	mpicc utils.c -c -o utils.o
-	mpicc sat.c -c -o sat.o
-	mpicc entry.c utils.o sat.o -o entry.o
+	mkdir ../bin
+	mpicc core.c -c -o ../bin/core.o
+	mpicc sat.c -c -o ../bin/sat.o
+	mpicc entry.c ../bin/core.o ../bin/sat.o -o ../bin/entry.o
 
 test:
 	clang sat.c test.c -o test.o
